@@ -1,0 +1,13 @@
+{
+  "name": "SmartMart POS",
+  "short_name": "SmartMart",
+  "description": "Point of Sale, Billing & Inventory Management",
+  "start_url": "/pos",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "orientation": "landscape-primary",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

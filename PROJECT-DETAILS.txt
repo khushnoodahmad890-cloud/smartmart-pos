@@ -1,0 +1,598 @@
+================================================================================
+                            SMARTMART POS
+        Complete Point of Sale, Billing & Inventory Management Platform
+                     Full Project & Feature Documentation
+================================================================================
+
+--------------------------------------------------------------------------------
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+SmartMart POS is a full-stack, production-ready Point of Sale, Billing,
+Inventory and Business Management platform built for retail stores,
+supermarkets, pharmacies, restaurants, clothing stores, electronics shops,
+grocery stores and wholesale businesses.
+
+It is a complete commercial software product — not a demo or CRUD tutorial —
+and ships in THREE deployment editions from a single codebase:
+
+  1. WEB EDITION (single business)  — classic client/server deployment
+  2. SAAS EDITION (multi-tenant)    — one server hosts unlimited stores,
+                                      each with its own isolated database
+  3. DESKTOP EDITION                — downloadable installer (Windows .exe,
+                                      Linux AppImage, macOS DMG) with an
+                                      embedded PostgreSQL database; runs
+                                      100% locally with no internet required
+
+The platform includes a built-in subscription system (Basic / Standard / Pro)
+with server-enforced feature gating, card checkout, and offline cryptographic
+license keys for desktop sales.
+
+--------------------------------------------------------------------------------
+2. TECHNOLOGY STACK
+--------------------------------------------------------------------------------
+Frontend:
+  - React 18 + TypeScript
+  - Vite (build tool, dev server)
+  - Tailwind CSS 4 (styling, dark/light themes)
+  - Zustand (state management with persistence)
+  - React Router 6 (routing with lazy loading / code splitting)
+  - Axios (API client with auto token refresh)
+  - Recharts (dashboard analytics charts)
+  - Lucide React (icon set)
+  - JsBarcode (barcode label rendering)
+  - html5-qrcode (camera barcode scanning, lazy loaded)
+  - SheetJS/xlsx (Excel import, lazy loaded)
+  - Vitest (unit tests for billing math)
+
+Backend:
+  - Node.js 20 + Express.js (REST API)
+  - PostgreSQL 17 (normalized relational database)
+  - JWT access tokens + rotating refresh tokens
+  - bcryptjs password & PIN hashing
+  - express-rate-limit (login + global API rate limiting)
+  - multer (image uploads)
+  - pdfkit (server-generated A4 PDF invoices)
+  - nodemailer (email receipts / password reset, optional SMTP)
+  - Server-Sent Events (real-time updates)
+  - Ed25519 signatures (offline license keys)
+
+Desktop:
+  - Electron shell + electron-builder (NSIS / AppImage / DMG installers)
+  - embedded-postgres (bundled database, zero setup for the end user)
+
+Deployment/Infra:
+  - Docker Compose (db + api + nginx web)
+  - Vercel-ready frontend, Railway-ready backend
+  - PWA (manifest + service worker, installable on tablets)
+
+--------------------------------------------------------------------------------
+3. DATABASE ARCHITECTURE
+--------------------------------------------------------------------------------
+30+ normalized PostgreSQL tables with primary/foreign keys, unique
+constraints, timestamps and indexes on all frequently searched fields
+(barcode, SKU, product name, invoice number, customer phone):
+
+  users, roles, permissions, role_permissions, branches,
+  categories, brands, units, products, product_barcodes,
+  inventory, inventory_movements, product_batches,
+  customers, suppliers,
+  sales, sale_items, payments, returns, return_items,
+  purchases, purchase_items, purchase_returns, purchase_return_items,
+  quotations, held_sales, shifts, cash_movements,
+  expenses, promotions, audit_logs, notifications, settings, counters,
+  subscriptions, billing_invoices, refresh_tokens, password_resets,
+  api_keys, webhooks, tenants (control DB, SaaS mode)
+
+Data-integrity guarantees:
+  - Every financial operation (sale, return, cancellation, purchase,
+    receiving, payment) runs inside a DATABASE TRANSACTION with row
+    locking (SELECT ... FOR UPDATE) — no partial writes, ever.
+  - Stock can never go negative unless explicitly enabled by the admin.
+  - Financial records are never deleted: cancellations and returns are
+    compensating entries; products are soft-deleted.
+  - Unique sequential document numbers via an atomic counters table:
+    INV-2026-000001 (sales), PUR (purchases), RET (returns),
+    PRET (purchase returns), QUO (quotations), SUB/LIC (billing).
+  - Weighted-average product costing updated on every goods receipt,
+    so COGS and profit are always accurate.
+
+--------------------------------------------------------------------------------
+4. USER ROLES & PERMISSIONS
+--------------------------------------------------------------------------------
+  - Role-based access control with 24 granular permission codes
+    (view_dashboard, create_sale, process_refund, edit_inventory,
+    manage_users, manage_settings, manage_billing, view_audit_logs, etc.)
+  - Built-in system roles: Super Admin, Manager, Cashier
+  - Custom roles can be created and their permissions edited from the UI
+    (visual permission-matrix editor grouped by category)
+  - Permissions are enforced ON THE SERVER per route; the UI additionally
+    hides/locks what the user cannot access
+  - Cashiers see only their own transactions; sensitive admin areas
+    are blocked (verified with automated tests)
+  - Disabling a user instantly revokes their refresh tokens/sessions
+
+--------------------------------------------------------------------------------
+5. AUTHENTICATION & SECURITY
+--------------------------------------------------------------------------------
+  - JWT access tokens (short-lived) + rotating refresh tokens; reuse of a
+    rotated refresh token is rejected
+  - bcrypt-hashed passwords (never stored or returned in plain text)
+  - Forgot/reset password flow (SMTP email in production; on-screen token
+    in demo mode)
+  - Cashier PIN quick-switching: 4–6 digit PIN keypad at the POS to swap
+    users in seconds without a full logout
+  - Login rate limiting (30 attempts / 15 min) + global API rate limit
+  - 100% parameterized SQL (SQL-injection safe)
+  - CORS configuration, environment-variable secrets, production error
+    messages never leak internals
+  - Complete audit log: every important action recorded with user, action,
+    description, IP address and timestamp (login, sales, refunds, stock
+    adjustments, settings/permission changes, license activation...)
+  - Audit-log retention policy with one-click purge
+
+--------------------------------------------------------------------------------
+6. POS TERMINAL (THE CORE)
+--------------------------------------------------------------------------------
+Layout: product grid + search + category filters on the left; cart,
+customer, totals and payment on the right. Designed for speed.
+
+Barcode & scanning:
+  - USB/keyboard barcode scanners (dedicated always-focused input field)
+  - Camera scanning via phone/tablet (html5-qrcode)
+  - SKU lookup, unknown-barcode / inactive / out-of-stock handling
+  - Scan SOUNDS: beep on success, buzz on unknown barcode, chime on sale
+    completion (WebAudio, toggleable)
+  - WEIGHT/SCALE BARCODES: EAN-13 "PP IIIII WWWWW C" labels resolve to the
+    product + embedded weight; price auto-computed per kg (prefix
+    configurable) — essential for grocery/butcher/produce
+  - EAN-13 barcode GENERATION with valid check digits, and printable
+    barcode LABELS (JsBarcode) with business name + price
+
+Cart & pricing:
+  - Quantity controls, line discounts and order discounts — both as fixed
+    AMOUNT or PERCENTAGE
+  - Automatic PROMOTIONS applied while scanning (see section 12)
+  - Wholesale PRICE TIERS: wholesale-flagged customers automatically get
+    wholesale prices
+  - Tax modes: EXCLUSIVE (added on top) or INCLUSIVE (extracted from price)
+  - HOLD / RECALL (park) sales — stored server-side so any terminal can
+    recall them; labeled ("customer in blue shirt")
+  - Cart persists in localStorage — survives refreshes and crashes
+
+Payments:
+  - Cash (with change calculation + quick-amount buttons), card, bank
+    transfer, mobile wallet
+  - SPLIT PAYMENTS: any combination in one sale (e.g. cash + card + credit)
+  - CREDIT SALES: unpaid remainder goes to the customer's account balance;
+    received later against the specific invoice
+  - LOYALTY POINTS as a payment method (redeem at configurable value)
+
+Receipts & sharing:
+  - Thermal receipt layouts (80mm and 58mm) with business logo
+  - Print, download, server-generated A4 PDF invoice (pdfkit)
+  - EMAIL receipts (SMTP) and WHATSAPP receipt sharing (pre-filled message
+    to the customer's number)
+  - Receipt customization: show/hide logo and tax breakdown, custom footer
+
+Cashier UX:
+  - Keyboard shortcuts: F1 help, F2 search, F4 customer, F6 discount,
+    F7 hold/recall, F8 payment, F9 complete, Esc close, Enter confirm
+  - Command palette (Ctrl/Cmd+K): jump to any page, product, invoice or
+    customer from one box
+  - Walk-in customer default; inline new-customer creation
+  - Kitchen order toggle (restaurant mode)
+
+CUSTOMER DISPLAY (second screen):
+  - /customer-display route opens on a second monitor/window and mirrors
+    the cart LIVE (BroadcastChannel + storage events): items, savings,
+    total, then change due + thank-you screen after payment
+
+OFFLINE-FIRST:
+  - Connection status indicator
+  - If the network drops, completed sales are QUEUED locally (localStorage)
+    and automatically synced in order when the connection returns
+  - Desktop edition works with no internet at all
+
+--------------------------------------------------------------------------------
+7. PRODUCTS & CATALOG
+--------------------------------------------------------------------------------
+  - Full product fields: name, SKU (auto-generated if empty), barcode,
+    category, brand, unit, supplier, description, image, purchase price,
+    selling price, discount price, WHOLESALE price, tax rate, min/max
+    stock levels, active status, timestamps
+  - Product image UPLOAD (multipart, served by the API) or URL
+  - Add / edit / soft-delete / activate-deactivate
+  - Search, filter (category, brand, stock level, status) and sort —
+    all server-side with pagination
+  - BULK IMPORT from CSV and EXCEL (.xlsx) with per-row error reporting
+  - Bulk export to CSV
+  - Categories with SUBCATEGORIES, brands, units — full management pages
+  - Barcode label printing page with copy counts per product
+
+--------------------------------------------------------------------------------
+8. INVENTORY MANAGEMENT
+--------------------------------------------------------------------------------
+  - Real-time stock per branch, stock value (at cost) and retail value
+  - Low-stock and out-of-stock dashboards with status badges
+  - Stock adjustments: add / remove / record damaged / set exact quantity
+    (reconciliation) — a REASON is required and everything is audited
+  - Branch-to-branch stock TRANSFERS
+  - Complete MOVEMENT HISTORY: every change shows product, quantity,
+    previous stock -> new stock, movement type (opening, purchase, sale,
+    return, adjustment, damage, transfer in/out, purchase return),
+    reference document, user, reason and timestamp
+  - BATCH & EXPIRY tracking (pharmacy/grocery): batch number + expiry date
+    captured at goods receipt, FEFO (first-expiry-first-out) depletion on
+    sale, "expiring stock" report with day-window filters
+  - Automatic low-stock/out-of-stock notifications when thresholds are
+    crossed
+
+--------------------------------------------------------------------------------
+9. SALES, RETURNS & CASH CONTROL
+--------------------------------------------------------------------------------
+Sales history:
+  - Search by invoice/customer, filter by status, payment method and date
+    range; CSV export; view/print/PDF any invoice
+  - Sale CANCELLATION (permission-gated): restores inventory, reverses
+    customer credit/points, preserves the financial record
+
+Returns & refunds:
+  - Find invoice -> select items & quantities -> reason -> refund
+  - Partial and full returns; refunds proportional to what was actually
+    paid (including line discounts and tax)
+  - Inventory automatically restored; original sale marked
+    partially_returned / returned — never deleted
+  - Large-refund notifications for admins
+
+Shifts & cash drawer:
+  - Open shift with a counted float
+  - Cash IN/OUT during the shift with mandatory reasons
+  - Sales auto-attach to the cashier's open shift
+  - Close shift with counted cash -> Z-REPORT: expected vs counted,
+    over/short, takings by payment method, cash movements list
+  - Printable Z-reports + full shift history
+
+--------------------------------------------------------------------------------
+10. CUSTOMERS (CRM) & SUPPLIERS
+--------------------------------------------------------------------------------
+Customers:
+  - Auto-generated customer codes, contact details, notes
+  - Total purchases, order count, purchase history, returns history
+  - CREDIT (receivables) balance with "receive payment" against specific
+    unpaid invoices
+  - LOYALTY POINTS balance (earn on paid amounts, redeem at checkout,
+    reversed if a sale is cancelled)
+  - Price tier flag (retail / wholesale)
+  - Customers with history cannot be hard-deleted (deactivate instead)
+
+Suppliers:
+  - Company/contact details, tax number, payment terms, notes
+  - Outstanding payable balance maintained automatically by purchases,
+    payments and purchase returns
+  - Purchase history and direct payment recording
+
+--------------------------------------------------------------------------------
+11. PURCHASING
+--------------------------------------------------------------------------------
+  - Purchase orders: pick supplier, add products with quantities and unit
+    costs, pay fully / partially / later
+  - Receive immediately or as an open PO; FULL or PARTIAL receiving
+    (receive 80 of 100 units; status: ordered -> partially_received ->
+    received)
+  - Optional batch number + expiry date per received line
+  - Goods receipt updates stock AND the product's weighted-average cost
+    (accurate COGS forever after)
+  - PURCHASE RETURNS to supplier: stock decreases, supplier balance
+    decreases; full history
+  - Outstanding balances per purchase and per supplier; payment recording
+
+--------------------------------------------------------------------------------
+12. PROMOTIONS ENGINE
+--------------------------------------------------------------------------------
+  - Promotion types: % off a specific product, % off an entire category,
+    and BOGO (Buy X Get Y free of the same product)
+  - Optional start/end dates; pause/activate toggle
+  - Evaluated automatically at the POS while scanning — the best applicable
+    promotion per line is applied as a discount with a toast
+    ("Weekend Sale applied — saved $1.20")
+  - All promotion discounts flow through the normal validated sale path
+
+--------------------------------------------------------------------------------
+13. QUOTATIONS & KITCHEN MODE
+--------------------------------------------------------------------------------
+Quotations:
+  - Build a quote (customer, lines, custom prices, validity date)
+  - Statuses: open / converted / expired / cancelled
+  - One click loads the quote into the POS; completing payment marks it
+    CONVERTED and links it to the resulting invoice
+
+Kitchen display (restaurant mode, toggle in Settings):
+  - POS gets a "Kitchen order" switch
+  - /kitchen page shows a live order queue (order age, items) updated in
+    REAL TIME via Server-Sent Events
+  - Status flow: pending -> preparing -> ready
+
+--------------------------------------------------------------------------------
+14. EXPENSES & FINANCE
+--------------------------------------------------------------------------------
+  - Expense tracking with categories (rent, electricity, internet,
+    salaries, transportation, maintenance, marketing, other), payment
+    method, date, creator; filtered totals
+  - TRUE PROFIT & LOSS:
+        Revenue (net of refunds)
+      − Cost of Goods Sold (weighted-average cost)
+      = Gross Profit
+      − Operating Expenses
+      = NET PROFIT (+ profit margin %)
+    Profit is NEVER computed from selling price alone.
+  - Tax collected, discounts given and refunds reported separately
+
+--------------------------------------------------------------------------------
+15. DASHBOARD, REPORTS & OWNER INTELLIGENCE
+--------------------------------------------------------------------------------
+Dashboard:
+  - KPI cards: sales, revenue, gross/net profit, products, low/out of
+    stock, customers, suppliers, refunds, purchases, pending payments
+  - Today vs yesterday DELTA chips (+12% vs yesterday) with 7-day
+    SPARKLINES per KPI
+  - Charts: revenue & profit over time, sales by payment method (donut),
+    sales by category (bars), best sellers, recent transactions
+  - Filters: today / yesterday / week / month / year / custom range,
+    and per-branch for super admins
+  - Daily sales TARGET progress bar
+
+Reports section (all printable + CSV export):
+  - Sales report (bucketed daily/weekly/monthly with COGS & gross profit)
+  - Product report (best sellers, most profitable, slow movers)
+  - Inventory report (stock, cost value, retail value, damaged log)
+  - Customer report (top customers, outstanding balances)
+  - Supplier report (purchases, payables)
+  - Financial report (full P&L statement + expense category chart)
+
+INSIGHTS page (automatic intelligence):
+  - DAILY DIGEST: revenue, profit, net, best sellers, refunds, expenses,
+    drawer results and per-cashier breakdown for any date
+  - ANOMALY FLAGS: refund spikes vs 30-day average, cashiers discounting
+    far above team average, cash drawers significantly over/short
+  - REORDER SUGGESTIONS: 30-day sales velocity vs current stock ->
+    days-of-cover remaining, suggested order quantity, estimated cost,
+    supplier — per product
+  - DEAD STOCK: products unsold for 60+ days and the capital tied up
+  - BUSIEST-HOURS HEATMAP: weekday × hour sales intensity (staffing tool)
+
+--------------------------------------------------------------------------------
+16. SUBSCRIPTION & BILLING SYSTEM (BUILT-IN SAAS MONETIZATION)
+--------------------------------------------------------------------------------
+Plans (USD):
+  BASIC    — Free           POS, products, inventory, customers, returns,
+                            dashboard; limits: 100 products / 2 users /
+                            1 branch
+  STANDARD — $29/mo, $290/y + suppliers, purchases, expenses, reports,
+                            shifts & Z-reports, quotations, PDF invoices;
+                            limits: 1,000 / 5 / 2
+  PRO      — $59/mo, $590/y + loyalty, promotions*, kitchen display, batch
+                            & expiry, wholesale tiers, audit logs, backup,
+                            email receipts; unlimited everything
+  New installs start on a 14-DAY PRO TRIAL.
+
+Enforcement (server-side, not cosmetic):
+  - requireFeature middleware returns HTTP 402 with the required plan name
+    on ~30 premium routes
+  - Plan LIMITS enforced at creation time (users/products/branches) with
+    friendly upgrade messages
+  - In-sale gating: points payments, wholesale pricing and kitchen orders
+    silently/explicitly disabled on lower plans
+  - Cancel/expiry NEVER blocks data — features lock, everything returns on
+    resubscribe; effective plan falls back to Basic
+
+Billing page:
+  - Current-plan card with trial/cancelled banners and days remaining
+  - Usage meters (users/products/branches vs plan limits, amber near cap)
+  - 3-plan comparison cards with monthly/yearly toggle (yearly ≈ 2 months
+    free)
+  - Card checkout (demo processor: 4242... succeeds, ...0002 declines;
+    structured for a drop-in Stripe swap)
+  - Payment history (SUB-/LIC- invoices with card last4)
+  - Cancel / resubscribe flows
+
+OFFLINE LICENSE KEYS (desktop sales):
+  - Format: SMPOS-<payload>-<signature>, Ed25519-signed
+  - The app ships only the vendor PUBLIC key: keys verify fully offline
+    and cannot be forged; tampering fails the signature check
+  - Vendor CLI: npm run keygen -- --plan pro --months 12 --customer "Name"
+    (also --forever for perpetual licenses)
+  - Expired keys rejected; expiry drops the install to Basic features
+  - Activation recorded as a LIC- invoice + audit entry
+  - UI: "Have a license key?" activation card on the Billing page
+
+--------------------------------------------------------------------------------
+17. MULTI-TENANT SAAS MODE
+--------------------------------------------------------------------------------
+  - Enabled with MULTI_TENANT=true (+ CONTROL_DATABASE_URL)
+  - DATABASE-PER-TENANT isolation: every store gets its OWN PostgreSQL
+    database — the strongest isolation model; cross-tenant data leaks are
+    architecturally impossible
+  - Self-serve public SIGNUP on the login screen ("Create your store"):
+    provisioning automatically creates the database, runs schema +
+    4 migrations, seeds roles/permissions, creates the owner account and
+    starts the 14-day Pro trial — in one request
+  - Requests carry an X-Tenant store-code header; middleware resolves the
+    tenant and routes ALL queries through AsyncLocalStorage — zero changes
+    were needed in any controller
+  - Per-store subscriptions, invoice numbering, feature gates, limits —
+    fully independent (verified: one store on Basic gets 402s while
+    another store stays Pro)
+  - Signup rate limiting; duplicate store codes rejected; provisioning is
+    rolled back (database dropped) if any step fails
+  - Single-tenant and desktop modes are completely unaffected (default)
+
+--------------------------------------------------------------------------------
+18. DESKTOP EDITION (DOWNLOADABLE SOFTWARE)
+--------------------------------------------------------------------------------
+  - Electron shell with a branded splash screen and native menus
+  - EMBEDDED POSTGRESQL: the installer bundles the database engine; on
+    first launch it initializes a cluster in the user's AppData folder —
+    the customer installs NOTHING else
+  - Boot sequence: start embedded DB -> run migrations -> first-run
+    bootstrap (clean install: admin account, no demo data, onboarding
+    wizard armed) -> start the bundled Express server (API + built
+    frontend on one local port) -> open the app window
+  - Per-install random JWT secret and DB password (config.json)
+  - Customer display opens as a real second OS window; external links
+    (WhatsApp) open in the system browser
+  - Single-instance lock, clean shutdown of DB + server on exit
+  - Other tills/tablets on the shop LAN can use the same install via the
+    PC's IP address
+  - electron-builder targets: Windows NSIS installer, Linux AppImage,
+    macOS DMG; a prepare-resources script builds the frontend and packages
+    the backend with production dependencies automatically
+  - "Help -> Open data folder" for backups/logs; data never leaves the PC
+
+--------------------------------------------------------------------------------
+19. PLATFORM & INTEGRATIONS
+--------------------------------------------------------------------------------
+  - REST API: ~90 endpoints under /api with consistent
+    { success, data, meta } JSON responses and clean error semantics
+    (400/401/402/403/404/409)
+  - API KEYS for machine access: SHA-256 hashed at rest, shown once,
+    revocable; read-only endpoints GET /api/v1/products and
+    GET /api/v1/sales via the X-API-Key header
+  - WEBHOOKS: HTTP POST to any URL on sale.created (and more), with
+    last-status/last-fired tracking
+  - Server-Sent Events (/api/events) push real-time sales, notifications
+    and kitchen updates to connected clients
+  - Database BACKUP download (pg_dump) from the Settings page
+  - PWA: installable app with manifest + service worker (app shell cached,
+    API never cached)
+  - Notification center (low stock, out of stock, large refunds, credit
+    sales, purchases, subscription changes) with unread badge
+  - Global search (Ctrl+K palette + topbar) across products, invoices,
+    customers and suppliers
+
+--------------------------------------------------------------------------------
+20. USER EXPERIENCE & INTERNATIONALIZATION
+--------------------------------------------------------------------------------
+  - Professional SaaS-grade UI: sidebar + topbar navigation, data tables
+    with server-side pagination, modals, dropdowns, toasts, confirmation
+    dialogs, loading skeletons, empty states, error states
+  - DARK and LIGHT mode, remembered per user
+  - Fully responsive: desktop, laptop, tablet, mobile (POS optimized for
+    desktop/tablet cashier use)
+  - ONBOARDING WIZARD on first run: business info -> logo upload ->
+    currency & tax -> first product -> done (5 steps, skippable)
+  - 4 UI LANGUAGES: English, Urdu (اردو), Arabic (العربية), Spanish
+    (Español) — switchable from the top bar
+  - ANY currency: code + symbol configurable per store ($, €, £, Rs., ...);
+    defaults are USD/UTC for international neutrality
+  - Business logo shown in the sidebar, receipts, invoices and customer
+    display
+
+--------------------------------------------------------------------------------
+21. MARKETING KIT (INCLUDED)
+--------------------------------------------------------------------------------
+  website/index.html  — production-ready landing page:
+    - 4 languages (EN / UR / AR / ES) with automatic RTL layout
+    - Hero with animated POS mockup, verticals, 6 feature cards,
+      3-plan USD pricing, FAQ answering real buyer objections
+    - Lead-capture form that stores the lead and opens WhatsApp pre-filled
+      with the prospect's details (plug in your number)
+    - Zero backend required — host free on Vercel/Netlify/GitHub Pages
+
+  website/brochure.html — print-ready A4 sales brochure:
+    - One page per language (EN / UR / AR / ES)
+    - Stats bar, 8 feature blocks, plan comparison table, contact CTA
+    - Open -> Ctrl+P -> Save as PDF
+
+--------------------------------------------------------------------------------
+22. QUALITY & TESTING
+--------------------------------------------------------------------------------
+  - 100+ automated end-to-end checks executed across all phases, covering:
+    auth & refresh rotation, permission walls, sale/return/cancel flows,
+    stock math, weighted-average costing, split/credit/points payments,
+    shifts & Z-reports, promotions math, license key verification
+    (valid/tampered/expired/perpetual), subscription gating per plan,
+    plan limits, multi-tenant isolation (16 dedicated tests), desktop
+    fresh-install boot (12 dedicated tests), and international defaults
+  - Vitest unit suite for cart/billing math (discount caps, tax modes,
+    floating-point safety) — 7/7 passing
+  - TypeScript strict compilation clean; zero-warning production build
+  - Route-level code splitting; heavy libraries lazy-loaded
+
+--------------------------------------------------------------------------------
+23. PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+pos-system/
+├── backend/
+│   ├── src/
+│   │   ├── config/          env loading & validation
+│   │   ├── controllers/     17 controllers (auth, products, sales,
+│   │   │                    returns, purchases, shifts, quotations,
+│   │   │                    billing, insights, promotions, platform,
+│   │   │                    tenants, ...)
+│   │   ├── db/              pool (tenant-aware), schema.sql,
+│   │   │                    4 migrations, migrate/seed/bootstrap
+│   │   ├── middleware/      auth (JWT + permissions), validation,
+│   │   │                    error handler
+│   │   ├── routes/          REST routes with per-route permission +
+│   │   │                    subscription-feature gates
+│   │   ├── services/        inventory, audit, numbering, subscription,
+│   │   │                    license, tenant, events (SSE), mail, pdf
+│   │   ├── tools/           license-keygen CLI
+│   │   └── index.js         server entry (serves built frontend too)
+│   ├── Dockerfile, railway.json, .env.example
+├── frontend/
+│   ├── src/
+│   │   ├── api/             axios client (auth, tenant, refresh, offline)
+│   │   ├── components/      UI kit, Receipt, CommandPalette,
+│   │   │                    OnboardingWizard, UpgradeGate, Sparkline
+│   │   ├── layouts/         app shell (sidebar, topbar, notifications)
+│   │   ├── pages/           22 pages (Dashboard, POS, Billing, Insights,
+│   │   │                    Promotions, Kitchen, CustomerDisplay, ...)
+│   │   ├── stores/          zustand: auth, cart, subscription, i18n,
+│   │   │                    offline queue, settings, theme, toasts
+│   │   └── utils/           formatting, sounds, customer display, CSV
+│   ├── public/              PWA manifest, service worker, icon
+│   ├── Dockerfile, nginx.conf, vercel.json
+├── desktop/
+│   ├── main.js              Electron shell (embedded PG + backend + window)
+│   ├── splash.html, preload.js
+│   ├── scripts/prepare-resources.js
+│   └── package.json         electron-builder config (NSIS/AppImage/DMG)
+├── website/
+│   ├── index.html           multilingual landing page
+│   └── brochure.html        multilingual A4 brochure
+├── docker-compose.yml       one-command full-stack deployment
+└── README.md                full documentation
+
+--------------------------------------------------------------------------------
+24. DEMO ACCOUNTS (SEEDED DEMO ENVIRONMENT)
+--------------------------------------------------------------------------------
+  Super Admin : admin    / admin123
+  Manager     : manager  / manager123
+  Cashier     : cashier  / cashier123
+
+  Demo data: 34 international products (USD prices), 8 categories,
+  10 brands, 6 customers, 4 suppliers, ~130 sales over 30 days,
+  purchases, expenses, shifts — everything needed for a convincing
+  sales demonstration.
+
+  (Production/desktop installs use a CLEAN bootstrap instead: one admin
+  account, no demo data, onboarding wizard on first login.)
+
+--------------------------------------------------------------------------------
+25. KEY BUSINESS RULES IMPLEMENTED
+--------------------------------------------------------------------------------
+  - Stock cannot go negative unless explicitly enabled by the admin
+  - Returned products increase stock; cancelled sales reverse inventory
+  - Purchases increase stock; purchase returns decrease it
+  - Every inventory adjustment requires a reason and creates an audit record
+  - Completed financial transactions are never hard-deleted
+  - Every financial transaction has a timestamp and a responsible user
+  - Invoice numbers and barcodes are unique (DB-enforced)
+  - Product cost is stored and maintained (weighted average) for true profit
+  - Discounts and taxes are calculated consistently everywhere
+  - Deleted products are soft-deleted so history remains intact
+
+================================================================================
+                              END OF DOCUMENT
+================================================================================

@@ -1,0 +1,62 @@
+{
+  "name": "smartmart-pos-desktop",
+  "productName": "SmartMart POS",
+  "version": "1.0.0",
+  "description": "Point of Sale, Billing & Inventory Management — Desktop Edition",
+  "main": "main.js",
+  "author": "SmartMart POS",
+  "license": "SEE LICENSE",
+  "scripts": {
+    "start": "electron .",
+    "prepare-resources": "node scripts/prepare-resources.js",
+    "dist": "npm run prepare-resources && electron-builder",
+    "dist:win": "npm run prepare-resources && electron-builder --win",
+    "dist:linux": "npm run prepare-resources && electron-builder --linux"
+  },
+  "dependencies": {
+    "embedded-postgres": "^17.2.0-beta.15"
+  },
+  "devDependencies": {
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.smartmart.pos",
+    "productName": "SmartMart POS",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/embedded-postgres/**",
+      "node_modules/@embedded-postgres/**"
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "node_modules/**"
+    ],
+    "extraResources": [
+      { "from": "resources/backend", "to": "backend" },
+      { "from": "resources/frontend-dist", "to": "frontend-dist" }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "SmartMart POS"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business",
+      "icon": "build/icon.icns"
+    }
+  }
+}

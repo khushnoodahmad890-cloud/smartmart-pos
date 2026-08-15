@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pos_user
+      POSTGRES_PASSWORD: pos_secret_2026
+      POSTGRES_DB: pos_db
+    volumes:
+      - pos_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos_user -d pos_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://pos_user:pos_secret_2026@db:5432/pos_db
+      JWT_SECRET: change_me_to_a_long_random_secret
+      CORS_ORIGIN: "*"
+    ports:
+      - "4000:4000"
+    command: sh -c "npm run migrate && npm run seed || true && npm start"
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+
+volumes:
+  pos_pgdata:
