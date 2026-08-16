@@ -86,8 +86,8 @@ function ean13(seq) {
 }
 
 async function seed() {
-  const existing = await pool.query(`SELECT COUNT(*) FROM users`);
-  if (Number(existing.rows[0].count) > 0) {
+ const existing = await pool.query(`SELECT COUNT(*) FROM products`);
+if (Number(existing.rows[0].count) > 0) {
     console.log('Database already seeded — skipping. (Truncate tables to re-seed.)');
     await pool.end();
     return;
@@ -95,37 +95,122 @@ async function seed() {
 
   await withTransaction(async (c) => {
     // Branches
-    const { rows: branchRows } = await c.query(
-      `INSERT INTO branches (name, code, address, phone) VALUES
-       ('Main Store', 'MAIN', '128 Market Street, Downtown', '+1 555 010 2000'),
-       ('Westside Branch', 'WEST', '45 West Avenue, Westside', '+1 555 010 3000')
-       RETURNING id`
-    );
-    const mainBranch = branchRows[0].id;
+  const { rows: existingBranch } = await c.query(
+  `SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1`
+);
+
+let mainBranch;
+
+if (existingBranch.length > 0) {
+  mainBranch = existingBranch[0].id;
+  console.log('✔ Using existing MAIN branch');
+} else {
+  const { rows: branchRows } = await c.query(
+    `INSERT INTO branches (name, code, address, phone)
+     VALUES ('Main Store', 'MAIN', '128 Market Street, Downtown', '+1 555 010 2000')
+     RETURNING id`
+  );
+  mainBranch = branchRows[0].id;
+  console.log('✔ Created MAIN branch');
+}
 
     // Permissions
     for (const [code, label, category] of PERMISSIONS) {
-      await c.query(`INSERT INTO permissions (code, label, category) VALUES ($1,$2,$3)`, [code, label, category]);
-    }
-
+  await c.query(
+    `INSERT INTO permissions (code, label, category)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (code) DO NOTHING`,
+    [code, label, category]
+  );
+}
     // Roles
-    const { rows: superRole } = await c.query(`INSERT INTO roles (name, description, is_system) VALUES ('super_admin','Full system access', TRUE) RETURNING id`);
-    const { rows: mgrRole } = await c.query(`INSERT INTO roles (name, description, is_system) VALUES ('manager','Store manager', TRUE) RETURNING id`);
-    const { rows: cashRole } = await c.query(`INSERT INTO roles (name, description, is_system) VALUES ('cashier','POS cashier', TRUE) RETURNING id`);
+   const getOrCreateRole = async (name, description) => {
+  const { rows: existing } = await c.query(
+    `SELECT id FROM roles WHERE name = $1 LIMIT 1`,
+    [name]
+  );
 
-    await c.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT $1, id FROM permissions`, [superRole[0].id]);
-    await c.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT $1, id FROM permissions WHERE code = ANY($2::text[])`, [mgrRole[0].id, MANAGER_PERMS]);
-    await c.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT $1, id FROM permissions WHERE code = ANY($2::text[])`, [cashRole[0].id, CASHIER_PERMS]);
+  if (existing.length > 0) {
+    return existing[0].id;
+  }
+
+  const { rows } = await c.query(
+    `INSERT INTO roles (name, description, is_system)
+     VALUES ($1, $2, TRUE)
+     RETURNING id`,
+    [name, description]
+  );
+
+  return rows[0].id;
+};
+
+const superRoleId = await getOrCreateRole(
+  'super_admin',
+  'Full system access'
+);
+
+const mgrRoleId = await getOrCreateRole(
+  'manager',
+  'Store manager'
+);
+
+const cashRoleId = await getOrCreateRole(
+  'cashier',
+  'POS cashier'
+);
+
+const superRole = [{ id: superRoleId }];
+const mgrRole = [{ id: mgrRoleId }];
+const cashRole = [{ id: cashRoleId }];
+
+await c.query(
+  `INSERT INTO role_permissions (role_id, permission_id)
+   SELECT $1, id FROM permissions
+   ON CONFLICT (role_id, permission_id) DO NOTHING`,
+  [superRole[0].id]
+);
+
+await c.query(
+  `INSERT INTO role_permissions (role_id, permission_id)
+   SELECT $1, id
+   FROM permissions
+   WHERE code = ANY($2::text[])
+   ON CONFLICT (role_id, permission_id) DO NOTHING`,
+  [mgrRole[0].id, MANAGER_PERMS]
+);
+
+await c.query(
+  `INSERT INTO role_permissions (role_id, permission_id)
+   SELECT $1, id
+   FROM permissions
+   WHERE code = ANY($2::text[])
+   ON CONFLICT (role_id, permission_id) DO NOTHING`,
+  [cashRole[0].id, CASHIER_PERMS]
+);
 
     // Users
     const mkUser = async (name, username, email, pw, roleId) => {
-      const hash = await bcrypt.hash(pw, 10);
-      const { rows } = await c.query(
-        `INSERT INTO users (name, username, email, password_hash, role_id, branch_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [name, username, email, hash, roleId, mainBranch]
-      );
-      return rows[0].id;
-    };
+  const { rows: existing } = await c.query(
+    `SELECT id FROM users WHERE username = $1 LIMIT 1`,
+    [username]
+  );
+
+  if (existing.length > 0) {
+    return existing[0].id;
+  }
+
+  const hash = await bcrypt.hash(pw, 10);
+
+  const { rows } = await c.query(
+    `INSERT INTO users
+      (name, username, email, password_hash, role_id, branch_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [name, username, email, hash, roleId, mainBranch]
+  );
+
+  return rows[0].id;
+};
     const adminId = await mkUser('Alex Morgan', 'admin', 'admin@demo.pos', ADMIN_PW, superRole[0].id);
     const managerId = await mkUser('Maria Garcia', 'manager', 'manager@demo.pos', MANAGER_PW, mgrRole[0].id);
     const cashierId = await mkUser('Sam Chen', 'cashier', 'cashier@demo.pos', CASHIER_PW, cashRole[0].id);
@@ -133,19 +218,64 @@ async function seed() {
     // Units, categories, brands
     const unitIds = {};
     for (const [name, short] of UNITS) {
-      const { rows } = await c.query(`INSERT INTO units (name, short_name) VALUES ($1,$2) RETURNING id`, [name, short]);
-      unitIds[short] = rows[0].id;
-    }
+  const { rows: existing } = await c.query(
+    `SELECT id FROM units WHERE short_name = $1 LIMIT 1`,
+    [short]
+  );
+
+  if (existing.length > 0) {
+    unitIds[short] = existing[0].id;
+  } else {
+    const { rows } = await c.query(
+      `INSERT INTO units (name, short_name)
+       VALUES ($1, $2)
+       RETURNING id`,
+      [name, short]
+    );
+
+    unitIds[short] = rows[0].id;
+  }
+}
     const catIds = {};
     for (const name of CATEGORIES) {
-      const { rows } = await c.query(`INSERT INTO categories (name) VALUES ($1) RETURNING id`, [name]);
-      catIds[name] = rows[0].id;
-    }
+  const { rows: existing } = await c.query(
+    `SELECT id FROM categories WHERE name = $1 LIMIT 1`,
+    [name]
+  );
+
+  if (existing.length > 0) {
+    catIds[name] = existing[0].id;
+  } else {
+    const { rows } = await c.query(
+      `INSERT INTO categories (name)
+       VALUES ($1)
+       RETURNING id`,
+      [name]
+    );
+
+    catIds[name] = rows[0].id;
+  }
+}
     const brandIds = {};
-    for (const name of BRANDS) {
-      const { rows } = await c.query(`INSERT INTO brands (name) VALUES ($1) RETURNING id`, [name]);
-      brandIds[name] = rows[0].id;
-    }
+  for (const name of BRANDS) {
+  const { rows: existing } = await c.query(
+    `SELECT id FROM brands WHERE name = $1 LIMIT 1`,
+    [name]
+  );
+
+  if (existing.length > 0) {
+    brandIds[name] = existing[0].id;
+  } else {
+    const { rows } = await c.query(
+      `INSERT INTO brands (name)
+       VALUES ($1)
+       RETURNING id`,
+      [name]
+    );
+
+    brandIds[name] = rows[0].id;
+  }
+}
 
     // Suppliers
     const supplierData = [
@@ -155,13 +285,30 @@ async function seed() {
       ['TechSource Electronics', 'Priya Patel', '+1 555 020 1004', 'b2b@techsource.example', 'Net 30'],
     ];
     const supplierIds = [];
-    for (const [company, contact, phone, email, terms] of supplierData) {
-      const { rows } = await c.query(
-        `INSERT INTO suppliers (company_name, contact_person, phone, email, payment_terms) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-        [company, contact, phone, email, terms]
-      );
-      supplierIds.push(rows[0].id);
-    }
+   
+
+for (const [company, contact, phone, email, terms] of supplierData) {
+  const { rows: existing } = await c.query(
+    `SELECT id FROM suppliers
+     WHERE company_name = $1
+     LIMIT 1`,
+    [company]
+  );
+
+  if (existing.length > 0) {
+    supplierIds.push(existing[0].id);
+  } else {
+    const { rows } = await c.query(
+      `INSERT INTO suppliers
+        (company_name, contact_person, phone, email, payment_terms)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [company, contact, phone, email, terms]
+    );
+
+    supplierIds.push(rows[0].id);
+  }
+}
 
     // Customers
     const customerData = [
@@ -173,16 +320,55 @@ async function seed() {
       ['Anna Kowalski', '+1 555 030 1006', 'anna.k@example.com'],
     ];
     const customerIds = [];
-    let custSeq = 0;
-    for (const [name, phone, email] of customerData) {
-      custSeq++;
-      const { rows } = await c.query(
-        `INSERT INTO customers (code, name, phone, email) VALUES ($1,$2,$3,$4) RETURNING id`,
-        [`CUST-${String(custSeq).padStart(5, '0')}`, name, phone, email]
-      );
-      customerIds.push(rows[0].id);
-    }
-    await c.query(`INSERT INTO counters (name, value) VALUES ('customer', $1)`, [custSeq]);
+   
+let custSeq = 0;
+
+for (const [name, phone, email] of customerData) {
+  const { rows: existing } = await c.query(
+    `SELECT id FROM customers
+     WHERE name = $1
+       AND phone = $2
+     LIMIT 1`,
+    [name, phone]
+  );
+
+  if (existing.length > 0) {
+    customerIds.push(existing[0].id);
+    custSeq++;
+  } else {
+    custSeq++;
+
+    const { rows } = await c.query(
+      `INSERT INTO customers
+        (code, name, phone, email)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [
+        `CUST-${String(custSeq).padStart(5, '0')}`,
+        name,
+        phone,
+        email
+      ]
+    );
+
+    customerIds.push(rows[0].id);
+  }
+}
+
+await c.query(
+  `INSERT INTO counters (name, value)
+   VALUES ('customer', $1)
+   ON CONFLICT (name)
+   DO UPDATE SET value = GREATEST(counters.value, EXCLUDED.value)`,
+  [custSeq]
+);
+   await c.query(
+  `INSERT INTO counters (name, value)
+   VALUES ('customer', $1)
+   ON CONFLICT (name)
+   DO UPDATE SET value = GREATEST(counters.value, EXCLUDED.value)`,
+  [custSeq]
+);
 
     // Products + inventory
     const productIds = [];
@@ -191,12 +377,81 @@ async function seed() {
       skuSeq++; bcSeq++;
       const sku = `SKU-${String(skuSeq).padStart(5, '0')}`;
       const barcode = ean13(bcSeq);
-      const { rows } = await c.query(
-        `INSERT INTO products (name, sku, barcode, category_id, brand_id, unit_id, supplier_id, purchase_price, avg_cost, selling_price, tax_rate, min_stock)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11) RETURNING id`,
-        [name, sku, barcode, catIds[cat], brandIds[brand], unitIds[unit], supplierIds[skuSeq % supplierIds.length], cost, price, tax, minStock]
-      );
-      const pid = rows[0].id;
+    const { rows: existingProducts } = await c.query(
+  `SELECT id FROM products
+   WHERE sku = $1 OR barcode = $2
+   LIMIT 1`,
+  [sku, barcode]
+);
+
+let pid;
+
+if (existingProducts.length > 0) {
+  pid = existingProducts[0].id;
+
+  await c.query(
+    `UPDATE products
+     SET name = $1,
+         category_id = $2,
+         brand_id = $3,
+         unit_id = $4,
+         supplier_id = $5,
+         purchase_price = $6,
+         avg_cost = $6,
+         selling_price = $7,
+         tax_rate = $8,
+         min_stock = $9
+     WHERE id = $10`,
+    [
+      name,
+      catIds[cat],
+      brandIds[brand],
+      unitIds[unit],
+      supplierIds[skuSeq % supplierIds.length],
+      cost,
+      price,
+      tax,
+      minStock,
+      pid
+    ]
+  );
+} else {
+  const { rows } = await c.query(
+    `INSERT INTO products
+      (name, sku, barcode, category_id, brand_id, unit_id,
+       supplier_id, purchase_price, avg_cost, selling_price,
+       tax_rate, min_stock)
+     VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11)
+     RETURNING id`,
+    [
+      name,
+      sku,
+      barcode,
+      catIds[cat],
+      brandIds[brand],
+      unitIds[unit],
+      supplierIds[skuSeq % supplierIds.length],
+      cost,
+      price,
+      tax,
+      minStock
+    ]
+  );
+
+  pid = rows[0].id;
+}
+
+productIds.push({
+  id: pid,
+  name,
+  sku,
+  cost,
+  price,
+  tax,
+  stock
+});
+    
       productIds.push({ id: pid, name, sku, cost, price, tax, stock });
       await c.query(`INSERT INTO inventory (product_id, branch_id, quantity) VALUES ($1,$2,$3)`, [pid, mainBranch, stock]);
       await c.query(
@@ -205,7 +460,13 @@ async function seed() {
         [pid, mainBranch, stock, sku, adminId]
       );
     }
-    await c.query(`INSERT INTO counters (name, value) VALUES ('sku', $1), ('barcode', $2)`, [skuSeq, bcSeq]);
+   await c.query(
+  `INSERT INTO counters (name, value)
+   VALUES ('sku', $1), ('barcode', $2)
+   ON CONFLICT (name)
+   DO UPDATE SET value = GREATEST(counters.value, EXCLUDED.value)`,
+  [skuSeq, bcSeq]
+);
 
     // Historic purchases
     let purSeq = 0;
@@ -248,7 +509,13 @@ async function seed() {
     await mkPurchase(2, 12, [11, 13, 14, 15, 31], 1);
     await mkPurchase(3, 8, [27, 28, 29, 30], 0.5);
     await mkPurchase(0, 3, [4, 6, 20, 23], 1);
-    await c.query(`INSERT INTO counters (name, value) VALUES ('purchase', $1)`, [purSeq]);
+   await c.query(
+  `INSERT INTO counters (name, value)
+   VALUES ('purchase', $1)
+   ON CONFLICT (name)
+   DO UPDATE SET value = GREATEST(counters.value, EXCLUDED.value)`,
+  [purSeq]
+);
 
     // Historic sales over the past 30 days
     let invSeq = 0;
@@ -306,7 +573,13 @@ async function seed() {
         );
       }
     }
-    await c.query(`INSERT INTO counters (name, value) VALUES ('invoice', $1)`, [invSeq]);
+  await c.query(
+  `INSERT INTO counters (name, value)
+   VALUES ('invoice', $1)
+   ON CONFLICT (name)
+   DO UPDATE SET value = GREATEST(counters.value, EXCLUDED.value)`,
+  [invSeq]
+);
 
     // Expenses
     const expenseData = [
