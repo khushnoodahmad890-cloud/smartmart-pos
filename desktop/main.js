@@ -71,7 +71,9 @@ function setSplashStatus(text) {
 
 async function startDatabase(cfg) {
   setSplashStatus('Starting database…');
-  const EmbeddedPostgres = require('embedded-postgres').default || require('embedded-postgres');
+
+  const embeddedPostgres = await import('embedded-postgres');
+  const EmbeddedPostgres = embeddedPostgres.default || embeddedPostgres;
   const dataDir = userDataPath('pgdata');
   const firstRun = !fs.existsSync(path.join(dataDir, 'PG_VERSION'));
 

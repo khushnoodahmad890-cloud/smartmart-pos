@@ -20,43 +20,39 @@
     "electron": "^31.3.0",
     "electron-builder": "^24.13.3"
   },
-  "build": {
-    "appId": "com.smartmart.pos",
-    "productName": "SmartMart POS",
-    "asar": true,
-    "asarUnpack": [
-      "node_modules/embedded-postgres/**",
-      "node_modules/@embedded-postgres/**"
-    ],
-    "files": [
-      "main.js",
-      "preload.js",
-      "splash.html",
-      "node_modules/**"
-    ],
-    "extraResources": [
-      { "from": "resources/backend", "to": "backend" },
-      { "from": "resources/frontend-dist", "to": "frontend-dist" }
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "build/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "shortcutName": "SmartMart POS"
-    },
-    "linux": {
-      "target": "AppImage",
-      "category": "Office",
-      "icon": "build/icon.png"
-    },
-    "mac": {
-      "target": "dmg",
-      "category": "public.app-category.business",
-      "icon": "build/icon.icns"
-    }
+ "build": {
+  "appId": "com.smartmart.pos",
+  "productName": "SmartMart POS",
+  "asar": false,
+  "files": [
+    "main.js",
+    "preload.js",
+    "splash.html",
+    "node_modules/**"
+  ],
+  "extraResources": [
+    { "from": "resources/backend", "to": "backend" },
+    { "from": "resources/frontend-dist", "to": "frontend-dist" }
+  ],
+  "win": {
+    "target": "nsis",
+    "icon": "build/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "shortcutName": "SmartMart POS"
+  },
+  "linux": {
+    "target": "AppImage",
+    "category": "Office",
+    "icon": "build/icon.png"
+  },
+  "mac": {
+    "target": "dmg",
+    "category": "public.app-category.business",
+    "icon": "build/icon.icns"
   }
+}
 }
