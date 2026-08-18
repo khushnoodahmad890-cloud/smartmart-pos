@@ -146,7 +146,7 @@ export function EmptyState({ title, subtitle, icon }: { title: string; subtitle?
 
 // ---------- Card ----------
 export function Card({ className = '', children }: { className?: string; children: React.ReactNode }) {
-  return <div className={`bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm ${className}`}>{children}</div>;
+  return <div className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-[0_1px_3px_rgba(16,24,40,0.06),0_1px_2px_rgba(16,24,40,0.04)] ${className}`}>{children}</div>;
 }
 
 // ---------- Pagination ----------

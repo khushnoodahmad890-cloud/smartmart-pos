@@ -145,8 +145,8 @@ export default function AppLayout() {
   return (
     <div className="h-full flex">
       {/* Sidebar */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex items-center gap-2.5 px-5 h-16 border-b border-slate-800">
+      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-[#0b1437] text-slate-300 flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex items-center gap-2.5 px-5 h-16 border-b border-white/5">
           {settings.business_logo
             ? <img src={settings.business_logo} alt="" className="w-9 h-9 rounded-lg object-contain bg-white/10 p-0.5" />
             : <div className="p-1.5 bg-indigo-600 rounded-lg"><Store size={20} className="text-white" /></div>}
@@ -159,12 +159,12 @@ export default function AppLayout() {
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5">
           {visibleNav.map((section) => (
             <div key={section.section}>
-              <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-1.5">{section.section}</p>
+              <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500/70 mb-1.5">{section.section}</p>
               {section.items.map((item) => (
                 <NavLink
                   key={item.to} to={item.to} end={item.to === '/'}
                   onClick={() => setSidebarOpen(false)}
-                  className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-lg text-sm mb-0.5 transition-colors ${isActive ? 'bg-indigo-600 text-white font-medium' : 'hover:bg-slate-800 hover:text-white'} ${item.feature && !hasFeature(item.feature) ? 'opacity-60' : ''}`}
+                  className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-xl text-sm mb-0.5 transition-all ${isActive ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-medium shadow-lg shadow-indigo-950/60' : 'text-slate-400 hover:bg-white/5 hover:text-white'} ${item.feature && !hasFeature(item.feature) ? 'opacity-60' : ''}`}
                 >
                   {item.icon}{navLabel(item.to, item.label)}
                   {item.feature && !hasFeature(item.feature) && <Lock size={12} className="ml-auto text-amber-400" />}
@@ -173,7 +173,17 @@ export default function AppLayout() {
             </div>
           ))}
         </nav>
-        <div className="p-3 border-t border-slate-800 space-y-2">
+        {subscription && subscription.effective_plan !== 'pro' && can('manage_billing', 'manage_settings') && (
+          <div className="mx-3 mb-2 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 p-4 text-white shadow-lg shadow-indigo-950/50">
+            <div className="flex items-center gap-2 mb-1"><Crown size={16} className="text-amber-300" /><p className="font-bold text-sm">Upgrade to Pro</p></div>
+            <p className="text-[11px] text-indigo-100 mb-3">Unlock loyalty, insights, multi-branch & more.</p>
+            <NavLink to="/billing" onClick={() => setSidebarOpen(false)}
+              className="block text-center bg-white text-indigo-700 rounded-xl py-2 text-xs font-bold hover:bg-indigo-50 transition-colors">
+              Upgrade
+            </NavLink>
+          </div>
+        )}
+        <div className="p-3 border-t border-white/5 space-y-2">
           {subscription && (
             <NavLink to="/billing" onClick={() => setSidebarOpen(false)}
               className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-slate-800 transition-colors">
@@ -199,8 +209,8 @@ export default function AppLayout() {
         <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3 px-4 lg:px-6 no-print">
           <button className="lg:hidden p-2 -ml-2" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
           <button onClick={() => setSearchOpen(true)}
-            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-400 hover:border-indigo-400 w-64">
-            <Search size={15} /> Search products, invoices…
+            className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-800 text-sm text-slate-400 hover:ring-2 hover:ring-indigo-300 dark:hover:ring-indigo-700 transition-all w-72">
+            <Search size={15} /> Search… <kbd className="ml-auto text-[10px] px-1.5 py-0.5 rounded-md bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 font-mono">Ctrl K</kbd>
           </button>
           <div className="ml-auto flex items-center gap-1.5">
             {!online && <Badge color="red">offline</Badge>}

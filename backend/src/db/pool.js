@@ -17,9 +17,12 @@ const als = new AsyncLocalStorage();
 const pools = new Map();
 
 function sslFor(url) {
-  return env.isProd && !url.includes('127.0.0.1') && !url.includes('localhost')
-    ? { rejectUnauthorized: false }
-    : false;
+  // Hosted providers (Neon, Railway, RDS, Supabase...) need TLS regardless of NODE_ENV.
+  const isLocal = url.includes('127.0.0.1') || url.includes('localhost');
+  const wantsSsl = /sslmode=require/i.test(url) || /neon\.tech|railway|rlwy\.net|supabase|rds\.amazonaws/i.test(url);
+  if (isLocal) return false;
+  if (wantsSsl || env.isProd) return { rejectUnauthorized: false };
+  return false;
 }
 
 export function poolFor(url) {
